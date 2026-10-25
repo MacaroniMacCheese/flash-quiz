@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#ffffff">
+    <title>Minimalist Quiz App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        .animate-slide-in { animation: slideInRight 0.3s ease-out forwards; }
+        .animate-zoom-in { animation: zoomIn 0.4s ease-out forwards; }
+        html { -webkit-text-size-adjust: 100%; }
+        body { -webkit-tap-highlight-color: transparent; padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+        button, label, input[type=checkbox] { touch-action: manipulation; }
+        /* 16px inputs stop iOS Safari from zooming on focus */
+        input[type=text], input[type=number], textarea { font-size: 16px !important; }
+        button:active:not(:disabled) { transform: scale(0.98); }
+        .sticky-actions { position: sticky; bottom: 0; padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
+        @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+        body::-webkit-scrollbar { display: none; }
+        body { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="min-h-screen min-h-[100dvh] bg-white text-gray-900 font-sans flex items-start sm:items-center justify-center py-4 sm:p-6 box-border">
+
+    <div id="app" class="w-full max-w-5xl"></div>
+
+    <script>
+        const icons = {
+            upload: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+            play: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
+            clock: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+            arrowRight: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`,
+            check: `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+            x: `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+            rotateCcw: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>`,
+            clipboard: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
+            checkSmall: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block"><polyline points="20 6 9 17 4 12"/></svg>`,
+            infoCircle: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`
+        };
+
+        const state = {
+            appState: 'setup',
+            rawQuestions: [],
+            activeQuestions: [],
+            pastedText: '',
+            settings: { randomizeQuestions: false, randomizeChoices: false, immediateFeedback: true, passingScore: 70, timeLimit: 30 },
+            currentIndex: 0,
+            score: 0,
+            timeLeft: 0,
+            timerRef: null,
+            questionStartTime: 0,
+            questionStats: [],
+            feedbackState: null,
+            previousScore: undefined,
+            previousTotal: undefined
+        };
+
+        const escapeHTML = (str) => String(str).replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
+
+        const formatTime = (secs) => {
+            const m = Math.floor(secs / 60);
+            const s = (secs % 60).toFixed(1);
+            return m > 0 ? `${m}m ${s}s` : `${s}s`;
+        };
+
+        const fmtClock = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+
+        const compressText = async (text) => {
+            if (!window.CompressionStream) return 'COMPZ_LEGACY:' + btoa(encodeURIComponent(text));
+            try {
+                const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+                const buffer = await new Response(stream).arrayBuffer();
+                const uint8 = new Uint8Array(buffer);
+                let binary = '';
+                for(let i = 0; i < uint8.length; i+=8192) {
+                    binary += String.fromCharCode.apply(null, uint8.subarray(i, i + 8192));
+                }
+                return 'COMPZ:' + btoa(binary);
+            } catch(e) {
+                return 'COMPZ_LEGACY:' + btoa(encodeURIComponent(text));
+            }
+        };
+
+        const decompressText = async (fullText) => {
+            const txt = fullText.trim();
+            if (txt.startsWith('COMPZ_LEGACY:')) return decodeURIComponent(atob(txt.replace('COMPZ_LEGACY:', '')));
+            if (txt.startsWith('COMPZ:')) {
+                try {
+                    const binary = atob(txt.replace('COMPZ:', ''));
+                    const uint8 = new Uint8Array(binary.length);
+                    for(let i = 0; i < binary.length; i++) uint8[i] = binary.charCodeAt(i);
+                    const stream = new Blob([uint8]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+                    return await new Response(stream).text();
+                } catch(e) { return ""; }
+            }
+            if (txt.startsWith('COMPRESSED:')) {
+                try {
+                    const json = JSON.parse(decodeURIComponent(atob(txt.replace('COMPRESSED:', ''))));
+                    let out = '';
+                    json.forEach((q, i) => {
+                        out += `Q${i+1} = {\nQuestion = "${q.question}"\nTypeOfQuestion = "${q.type}"\n`;
+                        if (q.type === 'Multiple Choice') q.options.forEach((o, j) => out += `OP${j+1} = "${o.text}"\n`);
+                        out += `Ans = "${q.answer}"\n`;
+                        if (q.info) out += `Info = "${q.info}"\n`;
+                        out += `}\n\n`;
+                    });
+                    return out;
+                } catch(e) { return ""; }
+            }
+            return txt;
+        };
+
+        const parseQuizFile = (text) => {
+            if (!text) return [];
+            const questions = [];
+            const blockRegex = /\w+\s*=\s*\{([^}]+)\}/g;
+            let match;
+            while ((match = blockRegex.exec(text)) !== null) {
+                const block = match[1];
+                const qMatch = block.match(/Question\s*=\s*"([^"]+)"/);
+                const typeMatch = block.match(/TypeOfQuestion\s*=\s*"([^"]+)"/);
+                if (!qMatch || !typeMatch) continue;
+
+                const type = typeMatch[1];
+                const questionObj = { id: Math.random().toString(36).substring(2, 9), question: qMatch[1], type: type, options: [], answer: null };
+
+                // Matches everything inside the Info quotes including actual multi-line paragraphs
+                const infoMatch = block.match(/Info\s*=\s*"([^"]+)"/);
+                // Also explicitly replace literal "\n" strings from the AI to actual newline characters
+                if (infoMatch) questionObj.info = infoMatch[1].replace(/\\n/g, '\n');
+
+                const options = {};
+                if (type === "Multiple Choice") {
+                    const optRegex = /(OP\d+)\s*=\s*"([^"]+)"/g;
+                    let optMatch;
+                    while ((optMatch = optRegex.exec(block)) !== null) {
+                        options[optMatch[1]] = optMatch[2];
+                        questionObj.options.push({ key: optMatch[1], text: optMatch[2] });
+                    }
+                }
+                const ansMatch = block.match(/Ans\s*=\s*(?:"([^"]+)"|([A-Za-z0-9_]+))/);
+                if (ansMatch) {
+                    const ansVal = ansMatch[1] || ansMatch[2];
+                    questionObj.answer = (type === "Multiple Choice" && options[ansVal] !== undefined) ? options[ansVal] : ansVal;
+                }
+                questions.push(questionObj);
+            }
+            return questions;
+        };
+
+        const processText = async (text) => {
+            const uncompressed = await decompressText(text);
+            const parsed = parseQuizFile(uncompressed);
+            state.rawQuestions = parsed;
+            return parsed;
+        };
+
+        const updateDOMForQuestions = (parsed, text) => {
+            const statusBar = document.getElementById('status-bar');
+            const statusText = document.getElementById('status-text');
+            const initBtn = document.getElementById('init-btn');
+            const compBtn = document.getElementById('compress-btn');
+
+            if (parsed.length > 0) {
+                if (statusBar) statusBar.className = "flex items-center justify-center p-3 rounded-xl border transition-colors bg-green-50 text-green-700 border-green-200";
+                if (statusText) statusText.innerHTML = `${icons.checkSmall} <span class="ml-1">${parsed.length} Questions Loaded Successfully</span>`;
+                if (initBtn) initBtn.disabled = false;
+                if (compBtn) {
+                    compBtn.classList.remove('hidden');
+                    compBtn.innerText = text.trim().startsWith('COMP') ? 'Show Uncompressed' : 'Compress Data';
+                }
+            } else {
+                if (statusBar) statusBar.className = "flex items-center justify-center p-3 rounded-xl border transition-colors bg-gray-50 text-gray-700 border-gray-200";
+                if (statusText) statusText.innerHTML = "Waiting for question data...";
+                if (initBtn) initBtn.disabled = true;
+                if (compBtn) compBtn.classList.add('hidden');
+            }
+        };
+
+        let pasteTimeout;
+        window.handleTextPaste = (text) => {
+            state.pastedText = text;
+            clearTimeout(pasteTimeout);
+            pasteTimeout = setTimeout(async () => {
+                const statusText = document.getElementById('status-text');
+                if (text.trim().startsWith('COMP') && statusText) statusText.innerHTML = "Decompressing...";
+                const parsed = await processText(text);
+                updateDOMForQuestions(parsed, text);
+            }, 200);
+        };
+
+        window.handleFileUpload = (input) => {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (evt) => {
+                state.pastedText = evt.target.result;
+                await processText(evt.target.result);
+                render();
+            };
+            reader.readAsText(file);
+        };
+
+        window.toggleCompression = async () => {
+            const btn = document.getElementById('compress-btn');
+            if (!btn) return;
+            btn.innerText = "Processing...";
+            btn.disabled = true;
+
+            if (state.pastedText.trim().startsWith('COMP')) {
+                try { state.pastedText = await decompressText(state.pastedText); } catch(e) {}
+            } else {
+                let txt = '';
+                state.rawQuestions.forEach((q, i) => {
+                    txt += `Q${i+1} = {\nQuestion = "${q.question}"\nTypeOfQuestion = "${q.type}"\n`;
+                    if (q.type === 'Multiple Choice') q.options.forEach((o, j) => txt += `OP${j+1} = "${o.text}"\n`);
+                    txt += `Ans = "${q.answer}"\n`;
+                    if (q.info) txt += `Info = "${q.info}"\n`;
+                    txt += `}\n\n`;
+                });
+                state.pastedText = await compressText(txt.trim());
+            }
+            render();
+        };
+
+        const shuffleArray = (array) => {
+            const newArr = [...array];
+            for (let i = newArr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+            }
+            return newArr;
+        };
+
+        window.updateSetting = (key, value) => { state.settings[key] = value; render(); };
+
+        window.startQuiz = () => {
+            if (state.rawQuestions.length === 0) return;
+            let processed = [...state.rawQuestions];
+            if (state.settings.randomizeQuestions) processed = shuffleArray(processed);
+            if (state.settings.randomizeChoices) processed = processed.map(q => q.type === 'Multiple Choice' ? { ...q, options: shuffleArray(q.options) } : q);
+            state.activeQuestions = processed;
+            state.currentIndex = 0;
+            state.score = 0;
+            state.questionStats = [];
+            state.feedbackState = null;
+            state.appState = 'quiz';
+            state.questionStartTime = Date.now();
+            render();
+            startTimer();
+        };
+
+        window.retakeQuiz = () => {
+            state.previousScore = state.score;
+            state.previousTotal = state.activeQuestions.length;
+            let processed = [...state.rawQuestions];
+            if (state.settings.randomizeQuestions) processed = shuffleArray(processed);
+            if (state.settings.randomizeChoices) processed = processed.map(q => q.type === 'Multiple Choice' ? { ...q, options: shuffleArray(q.options) } : q);
+            state.activeQuestions = processed;
+            state.currentIndex = 0;
+            state.score = 0;
+            state.questionStats = [];
+            state.feedbackState = null;
+            state.appState = 'quiz';
+            state.questionStartTime = Date.now();
+            render();
+            startTimer();
+        };
+
+        const startTimer = () => {
+            clearInterval(state.timerRef);
+            if (state.settings.timeLimit > 0) {
+                state.timeLeft = state.settings.timeLimit;
+                updateTimerDisplay();
+                state.timerRef = setInterval(() => {
+                    state.timeLeft--;
+                    if (state.timeLeft <= 0) {
+                        clearInterval(state.timerRef);
+                        checkAndProceed("[Time Out]", state.activeQuestions[state.currentIndex]);
+                    } else updateTimerDisplay();
+                }, 1000);
+            }
+        };
+
+        const updateTimerDisplay = () => {
+            const timerEl = document.getElementById('timer-display');
+            if (timerEl) {
+                timerEl.innerHTML = `${icons.clock} ${fmtClock(state.timeLeft)}`;
+                if (state.timeLeft <= 5) {
+                    timerEl.classList.add('text-red-500', 'font-bold', 'animate-pulse');
+                    timerEl.classList.remove('text-gray-600');
+                } else {
+                    timerEl.classList.remove('text-red-500', 'font-bold', 'animate-pulse');
+                    timerEl.classList.add('text-gray-600');
+                }
+            }
+        };
+
+        window.submitOption = (optIndex) => checkAndProceed(state.activeQuestions[state.currentIndex].options[optIndex].text, state.activeQuestions[state.currentIndex]);
+        window.submitTF = (answer) => checkAndProceed(answer, state.activeQuestions[state.currentIndex]);
+        window.submitIdent = () => {
+            const inputEl = document.getElementById('identInput');
+            if (!inputEl) return;
+            const val = inputEl.value.trim();
+            if (!val && (Date.now() - state.questionStartTime < 2000)) {
+                inputEl.placeholder = "Wait 2s before skipping...";
+                setTimeout(() => { if (inputEl) inputEl.placeholder = "Type your answer..."; }, 1000);
+                return;
+            }
+            checkAndProceed(val, state.activeQuestions[state.currentIndex]);
+        };
+        window.handleIdentKeydown = (event) => { if (event.key === 'Enter') window.submitIdent(); };
+
+        const checkAndProceed = (userAnswer, currentQ) => {
+            clearInterval(state.timerRef);
+            const timeTaken = (Date.now() - state.questionStartTime) / 1000;
+            const isCorrect = currentQ.type === 'Multiple Choice' ? userAnswer === currentQ.answer : String(userAnswer).trim().toLowerCase() === String(currentQ.answer).trim().toLowerCase();
+            if (isCorrect) state.score++;
+            state.questionStats.push({ question: currentQ.question, timeTaken, isCorrect, userAnswer, correctAnswer: currentQ.answer, info: currentQ.info });
+            if (state.settings.immediateFeedback) {
+                state.feedbackState = { isCorrect, userAnswer, correctAnswer: currentQ.answer };
+                render();
+            } else window.goToNextQuestion();
+        };
+
+        window.goToNextQuestion = () => {
+            state.feedbackState = null;
+            if (state.currentIndex + 1 < state.activeQuestions.length) {
+                state.currentIndex++;
+                state.questionStartTime = Date.now();
+                render();
+                startTimer();
+            } else {
+                state.appState = 'results';
+                render();
+            }
+        };
+
+        window.restart = () => {
+            state.appState = 'setup';
+            state.rawQuestions = [];
+            state.questionStats = [];
+            state.pastedText = '';
+            state.previousScore = undefined;
+            state.previousTotal = undefined;
+            render();
+        };
+
+        // ---------- Question builder ----------
+        const blankEditor = () => ({ index: -1, type: 'Multiple Choice', question: '', options: ['', '', '', ''], correct: 0, tf: 'True', answer: '', info: '' });
+        state.builder = { open: false, draft: [], editor: blankEditor(), error: '' };
+
+        // The file format can't hold " or { } inside values, so swap them for safe lookalikes
+        const cleanField = (str) => String(str).trim().replace(/"/g, '”').replace(/\{/g, '(').replace(/\}/g, ')');
+
+        const serializeQuestions = (list) => list.map((q, i) => {
+            let out = `Q${i + 1} = {\nQuestion = "${cleanField(q.question)}"\nTypeOfQuestion = "${q.type}"\n`;
+            if (q.type === 'Multiple Choice') {
+                q.options.forEach((o, j) => out += `OP${j + 1} = "${cleanField(o.text)}"\n`);
+                out += `Ans = "OP${q.options.findIndex(o => o.text === q.answer) + 1}"\n`;
+            } else out += `Ans = "${cleanField(q.answer)}"\n`;
+            if (q.info) out += `Info = "${cleanField(q.info)}"\n`;
+            return out + `}`;
+        }).join('\n\n');
+
+        const bState = () => state.builder;
+        window.toggleBuilder = () => {
+            const b = bState();
+            b.open = !b.open;
+            if (b.open && b.draft.length === 0 && state.rawQuestions.length > 0) {
+                b.draft = state.rawQuestions.map(q => ({ ...q, options: q.options.map(o => ({ ...o })) }));
+            }
+            b.error = '';
+            render();
+        };
+        window.bSet = (field, value) => { bState().editor[field] = value; };
+        window.bSetOption = (i, value) => { bState().editor.options[i] = value; };
+        window.bSetType = (type) => { bState().editor.type = type; bState().error = ''; render(); };
+        window.bAddOption = () => { bState().editor.options.push(''); render(); };
+        window.bRemoveOption = (i) => {
+            const e = bState().editor;
+            e.options.splice(i, 1);
+            if (e.correct === i) e.correct = 0; else if (e.correct > i) e.correct--;
+            render();
+        };
+        window.bSave = () => {
+            const b = bState(), e = b.editor;
+            const question = e.question.trim();
+            if (!question) { b.error = 'Please enter the question text.'; return render(); }
+            const q = { id: Math.random().toString(36).substring(2, 9), question, type: e.type, options: [], answer: null };
+            if (e.info.trim()) q.info = e.info.trim();
+            if (e.type === 'Multiple Choice') {
+                const correctText = (e.options[e.correct] || '').trim();
+                q.options = e.options.map(t => t.trim()).filter(Boolean).map((t, i) => ({ key: `OP${i + 1}`, text: t }));
+                if (q.options.length < 2) { b.error = 'Add at least two options.'; return render(); }
+                if (!correctText) { b.error = 'Select a correct option that is not empty.'; return render(); }
+                q.answer = correctText;
+            } else if (e.type === 'True or False') q.answer = e.tf;
+            else {
+                if (!e.answer.trim()) { b.error = 'Please enter the correct answer.'; return render(); }
+                q.answer = e.answer.trim();
+            }
+            if (e.index >= 0) b.draft[e.index] = q; else b.draft.push(q);
+            b.editor = blankEditor();
+            b.error = '';
+            render();
+        };
+        window.bEdit = (i) => {
+            const b = bState(), q = b.draft[i];
+            b.editor = {
+                index: i, type: q.type, question: q.question, info: q.info || '',
+                options: q.type === 'Multiple Choice' ? q.options.map(o => o.text) : ['', '', '', ''],
+                correct: q.type === 'Multiple Choice' ? Math.max(0, q.options.findIndex(o => o.text === q.answer)) : 0,
+                tf: q.type === 'True or False' ? q.answer : 'True',
+                answer: q.type === 'Identification' ? q.answer : ''
+            };
+            b.error = '';
+            render();
+            document.getElementById('builder-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+        window.bCancelEdit = () => { bState().editor = blankEditor(); bState().error = ''; render(); };
+        window.bDelete = (i) => {
+            const b = bState();
+            b.draft.splice(i, 1);
+            if (b.editor.index === i) b.editor = blankEditor(); else if (b.editor.index > i) b.editor.index--;
+            render();
+        };
+        window.bMove = (i, dir) => {
+            const d = bState().draft, j = i + dir;
+            if (j < 0 || j >= d.length) return;
+            [d[i], d[j]] = [d[j], d[i]];
+            bState().editor = blankEditor();
+            render();
+        };
+        window.bUse = () => {
+            const b = bState();
+            if (b.draft.length === 0) return;
+            state.pastedText = serializeQuestions(b.draft);
+            state.rawQuestions = b.draft.map(q => ({ ...q, options: q.options.map(o => ({ ...o })) }));
+            b.open = false;
+            render();
+        };
+        window.bDownload = () => {
+            const b = bState();
+            if (b.draft.length === 0) return;
+            const url = URL.createObjectURL(new Blob([serializeQuestions(b.draft)], { type: 'text/plain' }));
+            const a = document.createElement('a');
+            a.href = url; a.download = 'my-quiz.txt';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        };
+
+        const renderBuilder = () => {
+            const b = bState(), e = b.editor;
+            const inp = 'w-full p-3 sm:p-4 border border-gray-200 rounded-xl outline-none focus:border-black transition-colors bg-white';
+            const btn = 'min-h-[48px] px-4 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 ';
+            const toggle = `<button onclick="toggleBuilder()" class="w-full ${btn} border-2 border-dashed border-gray-300 text-gray-700 hover:border-black hover:text-black">${b.open ? 'Close question builder' : '✎ Create your own questions'}</button>`;
+            if (!b.open) return toggle;
+
+            const typeTabs = ['Multiple Choice', 'True or False', 'Identification'].map(t =>
+                `<button onclick="bSetType('${t}')" class="${btn} flex-1 border ${e.type === t ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-black'}">${t}</button>`).join('');
+
+            let answerHTML = '';
+            if (e.type === 'Multiple Choice') {
+                answerHTML = `<div class="space-y-2"><label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Options <span class="normal-case font-normal">(select the correct one)</span></label>` +
+                    e.options.map((o, i) => `
+                        <div class="flex items-center gap-2">
+                            <input type="radio" name="correct" ${e.correct === i ? 'checked' : ''} onchange="bSet('correct', ${i})" class="w-6 h-6 accent-black shrink-0" aria-label="Correct option ${i + 1}" />
+                            <input type="text" value="${escapeHTML(o)}" oninput="bSetOption(${i}, this.value)" placeholder="Option ${i + 1}" class="${inp}" autocomplete="off" />
+                            ${e.options.length > 2 ? `<button onclick="bRemoveOption(${i})" aria-label="Remove option ${i + 1}" class="${btn} w-12 shrink-0 border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300">✕</button>` : ''}
+                        </div>`).join('') +
+                    `<button onclick="bAddOption()" class="${btn} border border-gray-200 text-gray-700 hover:border-black">+ Add option</button></div>`;
+            } else if (e.type === 'True or False') {
+                answerHTML = `<div class="space-y-2"><label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Correct answer</label><div class="flex gap-2">` +
+                    ['True', 'False'].map(v => `<button onclick="bSet('tf','${v}'); render()" class="${btn} flex-1 border ${e.tf === v ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200 hover:border-black'}">${v}</button>`).join('') + `</div></div>`;
+            } else {
+                answerHTML = `<div class="space-y-2"><label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Correct answer</label><input type="text" value="${escapeHTML(e.answer)}" oninput="bSet('answer', this.value)" placeholder="Answer (not case sensitive)" class="${inp}" autocomplete="off" /></div>`;
+            }
+
+            const list = b.draft.length === 0 ? '<p class="text-sm text-gray-500 text-center py-2">No questions yet. Add your first one below.</p>' :
+                b.draft.map((q, i) => `
+                    <div class="flex items-start gap-2 p-3 border border-gray-200 rounded-xl bg-white ${e.index === i ? 'ring-2 ring-black' : ''}">
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-medium break-words"><span class="text-gray-400">${i + 1}.</span> ${escapeHTML(q.question)}</div>
+                            <div class="text-xs text-gray-500 mt-1 break-words">${q.type} • ${escapeHTML(q.answer)}</div>
+                        </div>
+                        <div class="flex flex-col sm:flex-row gap-1 shrink-0">
+                            <div class="flex gap-1">
+                                <button onclick="bMove(${i}, -1)" ${i === 0 ? 'disabled' : ''} aria-label="Move up" class="${btn} w-10 border border-gray-200 disabled:opacity-30">↑</button>
+                                <button onclick="bMove(${i}, 1)" ${i === b.draft.length - 1 ? 'disabled' : ''} aria-label="Move down" class="${btn} w-10 border border-gray-200 disabled:opacity-30">↓</button>
+                            </div>
+                            <div class="flex gap-1">
+                                <button onclick="bEdit(${i})" class="${btn} border border-gray-200 hover:border-black">Edit</button>
+                                <button onclick="bDelete(${i})" aria-label="Delete question" class="${btn} w-10 border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300">✕</button>
+                            </div>
+                        </div>
+                    </div>`).join('');
+
+            return `
+                ${toggle}
+                <div class="border border-gray-200 rounded-2xl p-3 sm:p-5 space-y-4 bg-gray-50 animate-fade-in">
+                    <div class="flex items-center justify-between">
+                        <h3 class="font-semibold">Your questions (${b.draft.length})</h3>
+                    </div>
+                    <div class="space-y-2">${list}</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button onclick="bUse()" ${b.draft.length === 0 ? 'disabled' : ''} class="${btn} bg-black text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">${icons.checkSmall} Use these questions</button>
+                        <button onclick="bDownload()" ${b.draft.length === 0 ? 'disabled' : ''} class="${btn} bg-white border border-gray-200 hover:border-black disabled:opacity-50 disabled:cursor-not-allowed">${icons.upload} Download .txt</button>
+                    </div>
+                    <div id="builder-editor" class="pt-4 border-t border-gray-200 space-y-4">
+                        <h3 class="font-semibold">${e.index >= 0 ? `Editing question ${e.index + 1}` : 'Add a question'}</h3>
+                        <div class="flex flex-col sm:flex-row gap-2">${typeTabs}</div>
+                        <div class="space-y-2">
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Question</label>
+                            <textarea rows="3" oninput="bSet('question', this.value)" placeholder="Type your question..." class="${inp} resize-y">${escapeHTML(e.question)}</textarea>
+                        </div>
+                        ${answerHTML}
+                        <div class="space-y-2">
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Explanation <span class="normal-case font-normal">(optional, shown after answering)</span></label>
+                            <textarea rows="2" oninput="bSet('info', this.value)" placeholder="Why is this the answer?" class="${inp} resize-y">${escapeHTML(e.info)}</textarea>
+                        </div>
+                        ${b.error ? `<div class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">${escapeHTML(b.error)}</div>` : ''}
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <button onclick="bSave()" class="${btn} flex-1 bg-black text-white hover:bg-gray-800">${e.index >= 0 ? 'Save changes' : '+ Add question'}</button>
+                            ${e.index >= 0 ? `<button onclick="bCancelEdit()" class="${btn} bg-white border border-gray-200 hover:border-black">Cancel</button>` : ''}
+                        </div>
+                    </div>
+                </div>`;
+        };
+
+        const renderSetup = () => {
+            const statusClasses = state.rawQuestions.length > 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-50 text-gray-700 border-gray-200';
+            return `
+                <div class="max-w-2xl mx-auto space-y-6 sm:space-y-8 animate-fade-in w-full">
+                    <div class="text-center space-y-2">
+                        <h1 class="text-3xl md:text-4xl font-light tracking-tight">Quiz Platform</h1>
+                        <p class="text-sm md:text-base text-gray-500">Upload, paste, or create your own questions, then configure and start.</p>
+                    </div>
+                    <div class="border border-gray-200 rounded-2xl p-4 sm:p-8 space-y-5 sm:space-y-6 bg-white shadow-sm">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div class="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl p-6 bg-gray-50 hover:bg-gray-100 transition-colors relative min-h-[120px] sm:min-h-[160px]">
+                                <div class="text-gray-400 mb-3">${icons.upload}</div>
+                                <span class="text-sm font-medium text-gray-600 text-center">Upload .txt file</span>
+                                <input type="file" accept=".txt" onchange="handleFileUpload(this)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                            </div>
+                            <div class="relative flex flex-col border-2 border-gray-200 rounded-xl bg-white overflow-hidden min-h-[160px] focus-within:border-black transition-colors group">
+                                <div class="absolute top-4 left-4 text-gray-400 group-focus-within:text-black transition-colors z-10">${icons.clipboard}</div>
+                                <textarea id="paste-input" oninput="handleTextPaste(this.value)" placeholder="...or paste text directly here" class="w-full h-full p-4 pl-12 pb-12 resize-none outline-none text-sm text-gray-700 bg-transparent relative z-20 leading-relaxed">${escapeHTML(state.pastedText || '')}</textarea>
+                                <button id="compress-btn" onclick="toggleCompression()" class="absolute bottom-3 right-3 z-30 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors ${state.rawQuestions.length > 0 ? '' : 'hidden'}">
+                                    ${state.pastedText.trim().startsWith('COMP') ? 'Show Uncompressed' : 'Compress Data'}
+                                </button>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-center p-3 rounded-xl border transition-colors ${statusClasses}" id="status-bar">
+                            <span class="font-medium text-sm flex items-center text-center" id="status-text">
+                                ${state.rawQuestions.length > 0 ? `${icons.checkSmall} <span class="ml-1">${state.rawQuestions.length} Questions Loaded Successfully</span>` : "Waiting for question data..."}
+                            </span>
+                        </div>
+                        ${renderBuilder()}
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-gray-100">
+                            <label class="flex items-center justify-between cursor-pointer min-h-[56px] p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
+                                <span class="text-sm font-medium">Randomize Questions</span>
+                                <input type="checkbox" ${state.settings.randomizeQuestions ? 'checked' : ''} onchange="updateSetting('randomizeQuestions', this.checked)" class="w-6 h-6 accent-black" />
+                            </label>
+                            <label class="flex items-center justify-between cursor-pointer min-h-[56px] p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
+                                <span class="text-sm font-medium">Randomize Options</span>
+                                <input type="checkbox" ${state.settings.randomizeChoices ? 'checked' : ''} onchange="updateSetting('randomizeChoices', this.checked)" class="w-6 h-6 accent-black" />
+                            </label>
+                            <label class="flex items-center justify-between cursor-pointer min-h-[56px] p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors">
+                                <span class="text-sm font-medium">Immediate Feedback</span>
+                                <input type="checkbox" ${state.settings.immediateFeedback ? 'checked' : ''} onchange="updateSetting('immediateFeedback', this.checked)" class="w-6 h-6 accent-black" />
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div class="space-y-2">
+                                <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Passing Score (%)</label>
+                                <input type="number" inputmode="numeric" min="1" max="100" value="${state.settings.passingScore}" onchange="updateSetting('passingScore', Number(this.value))" class="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-black transition-colors" />
+                            </div>
+                            <div class="space-y-2">
+                                <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Seconds Per Question</label>
+                                <input type="number" inputmode="numeric" min="0" value="${state.settings.timeLimit}" onchange="updateSetting('timeLimit', Number(this.value))" class="w-full p-4 border border-gray-200 rounded-xl outline-none focus:border-black transition-colors" />
+                            </div>
+                        </div>
+                        <button id="init-btn" onclick="startQuiz()" ${state.rawQuestions.length === 0 ? 'disabled' : ''} class="w-full py-4 bg-black text-white rounded-xl font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
+                            ${icons.play} Initialize
+                        </button>
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderQuiz = () => {
+            if (state.activeQuestions.length === 0) return '';
+            const currentQ = state.activeQuestions[state.currentIndex];
+            let optionsHTML = '';
+
+            if (currentQ.type === 'Multiple Choice') {
+                optionsHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">` + currentQ.options.map((opt, idx) => {
+                    let btnClass = "text-left p-4 sm:p-6 min-h-[56px] border rounded-xl transition-all font-medium h-auto break-words whitespace-normal text-sm md:text-base ";
+                    if (state.feedbackState) {
+                        if (opt.text === state.feedbackState.correctAnswer) btnClass += "border-green-500 bg-green-50 text-green-800 shadow-sm";
+                        else if (opt.text === state.feedbackState.userAnswer && !state.feedbackState.isCorrect) btnClass += "border-red-500 bg-red-50 text-red-800 opacity-75";
+                        else btnClass += "border-gray-200 bg-white opacity-40 cursor-not-allowed";
+                    } else btnClass += "border-gray-200 hover:border-black hover:bg-gray-50 cursor-pointer";
+                    return `<button ${state.feedbackState ? 'disabled' : `onclick="submitOption(${idx})"`} class="${btnClass}">${escapeHTML(opt.text)}</button>`;
+                }).join('') + `</div>`;
+            } else if (currentQ.type === 'True or False' || currentQ.type === 'True/False') {
+                optionsHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">` + ['True', 'False'].map(opt => {
+                    let btnClass = "p-4 sm:p-6 min-h-[56px] border rounded-xl transition-all font-medium text-base md:text-lg text-center h-auto break-words whitespace-normal ";
+                    if (state.feedbackState) {
+                        if (String(opt).toLowerCase() === String(state.feedbackState.correctAnswer).trim().toLowerCase()) btnClass += "border-green-500 bg-green-50 text-green-800 shadow-sm";
+                        else if (String(opt).toLowerCase() === String(state.feedbackState.userAnswer).trim().toLowerCase() && !state.feedbackState.isCorrect) btnClass += "border-red-500 bg-red-50 text-red-800 opacity-75";
+                        else btnClass += "border-gray-200 bg-white opacity-40 cursor-not-allowed";
+                    } else btnClass += `border-gray-200 cursor-pointer ${opt === 'True' ? 'hover:border-green-600 hover:bg-green-50 hover:text-green-700' : 'hover:border-red-600 hover:bg-red-50 hover:text-red-700'}`;
+                    return `<button ${state.feedbackState ? 'disabled' : `onclick="submitTF('${opt}')"`} class="${btnClass}">${opt}</button>`;
+                }).join('') + `</div>`;
+            } else {
+                let identClass = "w-full p-4 sm:p-6 text-base md:text-lg border rounded-xl outline-none transition-colors ";
+                if (state.feedbackState) {
+                    let identValue = state.feedbackState.isCorrect ? state.feedbackState.userAnswer : `❌ ${state.feedbackState.userAnswer || '(blank)'}  ➔  ✅ ${state.feedbackState.correctAnswer}`;
+                    identClass += state.feedbackState.isCorrect ? "border-green-500 bg-green-50 text-green-800" : "border-red-500 bg-red-50 text-red-800 font-medium";
+                    optionsHTML = `<div class="space-y-4"><div class="${identClass} min-h-[64px] sm:min-h-[76px] h-auto break-words whitespace-pre-wrap">${escapeHTML(identValue)}</div></div>`;
+                } else {
+                    identClass += "border-gray-200 focus:border-black bg-white";
+                    optionsHTML = `<div class="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full"><input type="text" id="identInput" onkeydown="handleIdentKeydown(event)" placeholder="Type your answer..." class="${identClass} flex-1" autocomplete="off" value="" /><button onclick="submitIdent()" class="w-full sm:w-auto px-6 py-4 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-all flex items-center justify-center gap-2">Submit ${icons.arrowRight}</button></div>`;
+                }
+            }
+
+            if (state.feedbackState) {
+                optionsHTML += `<div class="pt-5 mt-5 border-t border-gray-100 flex flex-col space-y-4 animate-fade-in">`;
+                // Add whitespace-pre-wrap to properly render newlines
+                if (currentQ.info) optionsHTML += `<div class="p-4 sm:p-5 bg-blue-50 text-blue-900 rounded-xl text-sm sm:text-lg border border-blue-200 leading-relaxed shadow-sm whitespace-pre-wrap"><strong>Info: </strong>\n${escapeHTML(currentQ.info)}</div>`;
+                optionsHTML += `<div class="sticky-actions bg-white/95 backdrop-blur pt-2 -mx-1 px-1"><button id="next-btn" onclick="goToNextQuestion()" class="w-full sm:w-auto px-8 py-4 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-all flex items-center justify-center gap-2 shadow-lg sm:ml-auto">${state.currentIndex + 1 < state.activeQuestions.length ? 'Next Question' : 'See Results'} ${icons.arrowRight}</button></div></div>`;
+            }
+
+            return `
+                <div class="w-full max-w-2xl mx-auto space-y-6 sm:space-y-8 animate-slide-in pb-2">
+                    <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden -mb-2"><div class="h-full bg-black rounded-full transition-all duration-300" style="width:${(state.currentIndex + (state.feedbackState ? 1 : 0)) / state.activeQuestions.length * 100}%"></div></div>
+                    <div class="flex items-center justify-between border-b border-gray-200 pb-3 sm:pb-4">
+                        <div class="text-xs sm:text-sm font-medium text-gray-500">Question ${state.currentIndex + 1} of ${state.activeQuestions.length}</div>
+                        ${state.settings.timeLimit > 0 ? `<div id="timer-display" class="flex items-center gap-2 font-mono text-xs sm:text-sm ${state.timeLeft <= 5 ? 'text-red-500 font-bold' : 'text-gray-600'}">${icons.clock} ${fmtClock(state.timeLeft)}</div>` : ''}
+                    </div>
+                    <div class="space-y-5 sm:space-y-6">
+                        <h2 class="text-xl sm:text-2xl font-medium leading-relaxed">${escapeHTML(currentQ.question)}</h2>
+                        ${optionsHTML}
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderResults = () => {
+            const percent = (state.score / state.activeQuestions.length) * 100;
+            const passed = percent >= state.settings.passingScore;
+            const totalTime = state.questionStats.reduce((acc, curr) => acc + curr.timeTaken, 0);
+            const avgTime = totalTime / state.questionStats.length || 0;
+            const sortedByTime = [...state.questionStats].sort((a, b) => b.timeTaken - a.timeTaken);
+
+            let previousStatsHTML = '';
+            if (state.previousScore !== undefined) {
+                const diff = state.score - state.previousScore;
+                previousStatsHTML = `
+                    <div class="p-5 sm:p-6 border border-gray-200 rounded-2xl bg-white flex flex-row justify-around gap-2 w-full max-w-4xl mx-auto mb-6 sm:mb-8 text-center shadow-sm">
+                        <div><div class="text-xs sm:text-sm text-gray-500">Previous</div><div class="text-xl sm:text-2xl font-medium">${state.previousScore} / ${state.previousTotal}</div></div>
+                        <div><div class="text-xs sm:text-sm text-gray-500">Current</div><div class="text-xl sm:text-2xl font-medium">${state.score} / ${state.activeQuestions.length}</div></div>
+                        <div><div class="text-xs sm:text-sm text-gray-500">Difference</div><div class="text-xl sm:text-2xl font-medium ${diff > 0 ? 'text-green-600' : (diff < 0 ? 'text-red-600' : 'text-gray-600')}">${diff > 0 ? `+${diff}` : diff}</div></div>
+                    </div>
+                `;
+            }
+
+            const times = state.questionStats.map(stat => stat.timeTaken);
+            const maxTime = Math.max(...times, 1);
+            const svgW = 1000;
+            const svgH = 100;
+            const points = times.map((t, i) => {
+                const x = times.length > 1 ? (i / (times.length - 1)) * svgW : svgW / 2;
+                const y = svgH - ((t / maxTime) * (svgH - 20)) - 10;
+                return `${x},${y}`;
+            }).join(' ');
+
+            const lineGraphHTML = times.length > 0 ? `
+                <div class="w-full h-28 sm:h-32 mt-2 mb-4 bg-gray-50 rounded-xl border border-gray-100 relative p-4 group overflow-visible">
+                    <div class="absolute top-2 left-3 text-[10px] text-gray-400 font-medium uppercase tracking-wider">Time (s)</div>
+                    <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-full overflow-visible" preserveAspectRatio="none">
+                        <polyline points="${points}" fill="none" stroke="#22c55e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" class="opacity-80"/>
+                        ${times.map((t, i) => {
+                            const x = times.length > 1 ? (i / (times.length - 1)) * svgW : svgW / 2;
+                            const y = svgH - ((t / maxTime) * (svgH - 20)) - 10;
+                            return `<circle cx="${x}" cy="${y}" r="4" fill="#fff" stroke="#22c55e" stroke-width="2"><title>Q${i+1}: ${formatTime(t)}</title></circle>`;
+                        }).join('')}
+                    </svg>
+                </div>
+            ` : '';
+
+            return `
+                <div class="animate-zoom-in w-full flex flex-col items-center pb-8 sm:pb-12">
+
+                    <div class="max-w-5xl w-full p-6 sm:p-8 border border-gray-200 rounded-2xl space-y-4 bg-gray-50 text-center mb-6 sm:mb-8 shadow-sm">
+                        <div class="flex justify-center">${passed ? `<div class="w-14 h-14 sm:w-16 sm:h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center">${icons.check}</div>` : `<div class="w-14 h-14 sm:w-16 sm:h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center">${icons.x}</div>`}</div>
+                        <div class="space-y-2">
+                            <h2 class="text-2xl sm:text-3xl font-light">${passed ? "Validation Passed" : "Validation Failed"}</h2>
+                            <p class="text-gray-500 text-base sm:text-lg">Scored <span class="font-semibold text-black">${state.score}</span> out of <span class="font-semibold text-black">${state.activeQuestions.length}</span> (${percent.toFixed(0)}%)</p>
+                            <div class="flex items-center justify-center gap-2 sm:gap-4 text-xs sm:text-sm font-medium text-gray-600 pt-2">
+                                <span>Total: ${formatTime(totalTime)}</span><span>&bull;</span><span>Avg: ${formatTime(avgTime)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${previousStatsHTML}
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 w-full max-w-5xl mb-6 sm:mb-8">
+                        <button onclick="retakeQuiz()" class="w-full py-4 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-all flex items-center justify-center gap-2 shadow-sm">${icons.play} Retake Quiz</button>
+                        <button onclick="restart()" class="w-full py-4 bg-white border border-gray-200 text-black rounded-xl font-medium hover:bg-gray-50 transition-all flex items-center justify-center gap-2 shadow-sm">${icons.rotateCcw} Start New Session</button>
+                    </div>
+
+                    <div class="w-full max-w-5xl flex flex-col space-y-6 sm:space-y-8 items-center">
+                        <div class="w-full border border-gray-200 rounded-2xl p-5 sm:p-6 bg-white space-y-4 shadow-sm">
+                            <h3 class="font-semibold text-base sm:text-lg flex items-center gap-2">${icons.clock} Time Distribution</h3>
+                            ${lineGraphHTML}
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-4">
+                                ${sortedByTime.map(stat => `<div class="p-3 bg-gray-50 rounded-xl text-xs sm:text-sm flex justify-between items-start gap-3 border border-gray-100"><span class="text-gray-700 break-words whitespace-normal pr-2">${escapeHTML(stat.question)}</span><span class="font-mono font-medium whitespace-nowrap ${stat.timeTaken > avgTime * 1.5 ? 'text-red-500' : 'text-gray-900'}">${formatTime(stat.timeTaken)}</span></div>`).join('')}
+                            </div>
+                        </div>
+
+                        <div class="w-full border border-gray-200 rounded-2xl p-5 sm:p-6 bg-white space-y-4 shadow-sm">
+                            <div class="flex items-center justify-between border-b border-gray-100 pb-4">
+                                <h3 class="font-semibold text-base sm:text-lg">Detailed Breakdown</h3>
+                                <div class="flex items-center gap-2 sm:gap-3">
+                                    <div class="text-right">
+                                        <div class="text-[10px] sm:text-xs text-gray-500 uppercase tracking-wider">Accuracy</div>
+                                        <div class="text-base sm:text-lg font-medium leading-none">${percent.toFixed(0)}%</div>
+                                    </div>
+                                    <svg viewBox="0 0 32 32" class="w-8 h-8 sm:w-10 sm:h-10 transform -rotate-90 rounded-full">
+                                        <circle r="15.9155" cx="16" cy="16" fill="transparent" stroke="#fca5a5" stroke-width="32"></circle>
+                                        <circle r="15.9155" cx="16" cy="16" fill="transparent" stroke="#22c55e" stroke-width="32" stroke-dasharray="${percent} 100"></circle>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                ${state.questionStats.map((stat, i) => `
+                                    <div class="p-4 sm:p-5 ${stat.isCorrect ? 'bg-green-50 border-l-4 border-green-500' : 'bg-red-50 border-l-4 border-red-500'} rounded-r-xl text-sm space-y-2 break-words whitespace-normal shadow-sm">
+                                        <div class="font-medium text-gray-900 mb-2">Q${i + 1}: ${escapeHTML(stat.question)}</div>
+                                        ${!stat.isCorrect ? `<div class="text-red-700">Answered: <span class="line-through opacity-75">${escapeHTML(stat.userAnswer || '(blank)')}</span></div><div class="text-green-700 font-medium mt-1">Correct: ${escapeHTML(stat.correctAnswer)}</div>` : `<div class="text-green-700 font-medium">Answered: ${escapeHTML(stat.correctAnswer)}</div>`}
+
+                                        ${stat.info ? `
+                                            <button onclick="this.nextElementSibling.classList.toggle('hidden')" class="mt-3 flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-black transition-colors uppercase tracking-wider outline-none">
+                                                ${icons.infoCircle} Toggle Info
+                                            </button>
+                                            <div class="hidden mt-2 text-blue-900 text-xs sm:text-sm bg-blue-100/60 p-3 rounded-lg leading-relaxed border border-blue-200/50 whitespace-pre-wrap">${escapeHTML(stat.info)}</div>
+                                        ` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const render = () => {
+            const appDiv = document.getElementById('app');
+            const viewKey = `${state.appState}:${state.currentIndex}`;
+            if (viewKey !== state.lastView && !state.feedbackState) { window.scrollTo(0, 0); state.lastView = viewKey; }
+            if (state.appState === 'setup') appDiv.innerHTML = renderSetup();
+            else if (state.appState === 'quiz') {
+                appDiv.innerHTML = renderQuiz();
+                if (!state.feedbackState) setTimeout(() => { const identInput = document.getElementById('identInput'); if (identInput) identInput.focus(); }, 10);
+            } else if (state.appState === 'results') appDiv.innerHTML = renderResults();
+        };
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && state.appState === 'quiz' && state.feedbackState) {
+                e.preventDefault();
+                window.goToNextQuestion();
+            }
+        });
+
+        window.onload = render;
+    </script>
+</body>
+</html>
